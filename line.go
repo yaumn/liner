@@ -108,7 +108,7 @@ func (s *State) refresh(prompt []rune, buf []rune, pos int) error {
 
 func (s *State) refreshSingleLine(prompt []rune, buf []rune, pos int) error {
 	s.cursorPos(0)
-	_, err := fmt.Print(string(prompt))
+	_, err := s.PrintPrompt()
 	if err != nil {
 		return err
 	}
@@ -205,7 +205,7 @@ func (s *State) refreshMultiLine(prompt []rune, buf []rune, pos int) error {
 	s.eraseLine()
 
 	/* Write the prompt and the current buffer content */
-	if _, err := fmt.Print(string(prompt)); err != nil {
+	if _, err := s.PrintPrompt(); err != nil {
 		return err
 	}
 	if _, err := fmt.Print(string(buf)); err != nil {
@@ -483,7 +483,7 @@ func (s *State) reverseISearch(origLine []rune, origPos int) ([]rune, int, inter
 				return origLine, origPos, rune(esc), err
 
 			case tab, cr, lf, ctrlA, ctrlB, ctrlD, ctrlE, ctrlF, ctrlK,
-				ctrlL, ctrlN, ctrlO, ctrlP, ctrlQ, ctrlT, ctrlU, ctrlV, ctrlW, ctrlX, ctrlY, ctrlZ:
+				ctrlL, ctrlN, ctrlO, ctrlP, ctrlQ, ctrlT, ctrlU, ctrlV, ctrlW, ctrlX, ctrlY:
 				fallthrough
 			case 0, ctrlC, esc, 28, 29, 30, 31:
 				return []rune(foundLine), foundPos, next, err
@@ -589,11 +589,19 @@ func (s *State) yank(p []rune, text []rune, pos int) ([]rune, int, interface{}, 
 	}
 }
 
+func (s *State) PrintPrompt() (int, error) {
+	if s.promptColor != nil {
+		return fmt.Print(s.promptColor.Sprint(s.prompt))
+	} else {
+		return fmt.Print(s.prompt)
+	}
+}
+
 // Prompt displays p and returns a line of user input, not including a trailing
 // newline character. An io.EOF error is returned if the user signals end-of-file
 // by pressing Ctrl-D. Prompt allows line editing if the terminal supports it.
-func (s *State) Prompt(prompt string) (string, error) {
-	return s.PromptWithSuggestion(prompt, "", 0)
+func (s *State) Prompt() (string, error) {
+	return s.PromptWithSuggestion("", 0)
 }
 
 // PromptWithSuggestion displays prompt and an editable text with cursor at
@@ -601,19 +609,19 @@ func (s *State) Prompt(prompt string) (string, error) {
 // is negative or greater than length of text (in runes). Returns a line of user input, not
 // including a trailing newline character. An io.EOF error is returned if the user
 // signals end-of-file by pressing Ctrl-D.
-func (s *State) PromptWithSuggestion(prompt string, text string, pos int) (string, error) {
-	for _, r := range prompt {
+func (s *State) PromptWithSuggestion(text string, pos int) (string, error) {
+	for _, r := range s.prompt {
 		if unicode.Is(unicode.C, r) {
 			return "", ErrInvalidPrompt
 		}
 	}
 	if s.inputRedirected || !s.terminalSupported {
-		return s.promptUnsupported(prompt)
+		return s.promptUnsupported(s.prompt)
 	}
-	p := []rune(prompt)
+
 	const minWorkingSpace = 10
-	if s.columns < countGlyphs(p)+minWorkingSpace {
-		return s.tooNarrow(prompt)
+	if s.columns < countGlyphs([]rune(s.prompt))+minWorkingSpace {
+		return s.tooNarrow(s.prompt)
 	}
 	if s.outputRedirected {
 		return "", ErrNotTerminalOutput
@@ -622,7 +630,7 @@ func (s *State) PromptWithSuggestion(prompt string, text string, pos int) (strin
 	s.historyMutex.RLock()
 	defer s.historyMutex.RUnlock()
 
-	fmt.Print(prompt)
+	//s.PrintPrompt()
 	var line = []rune(text)
 	historyEnd := ""
 	var historyPrefix []string
@@ -637,7 +645,7 @@ func (s *State) PromptWithSuggestion(prompt string, text string, pos int) (strin
 		pos = len(line)
 	}
 	if len(line) > 0 {
-		err := s.refresh(p, line, pos)
+		err := s.refresh([]rune(s.prompt), line, pos)
 		if err != nil {
 			return "", err
 		}
@@ -664,13 +672,13 @@ mainLoop:
 			switch v {
 			case cr, lf:
 				if s.needRefresh {
-					err := s.refresh(p, line, pos)
+					err := s.refresh([]rune(s.prompt), line, pos)
 					if err != nil {
 						return "", err
 					}
 				}
 				if s.multiLineMode {
-					s.resetMultiLine(p, line, pos)
+					s.resetMultiLine([]rune(s.prompt), line, pos)
 				}
 				fmt.Println()
 				break mainLoop
@@ -784,14 +792,14 @@ mainLoop:
 			case ctrlC: // reset
 				fmt.Println("^C")
 				if s.multiLineMode {
-					s.resetMultiLine(p, line, pos)
+					s.resetMultiLine([]rune(s.prompt), line, pos)
 				}
 				if s.ctrlCAborts {
 					return "", ErrPromptAborted
 				}
 				line = line[:0]
 				pos = 0
-				fmt.Print(prompt)
+				s.PrintPrompt()
 				s.restartPrompt()
 			case ctrlH, bs: // Backspace
 				if pos <= 0 {
@@ -816,28 +824,34 @@ mainLoop:
 			case ctrlW: // Erase word
 				pos, line, killAction = s.eraseWord(pos, line, killAction)
 			case ctrlY: // Paste from Yank buffer
-				line, pos, next, err = s.yank(p, line, pos)
+				line, pos, next, err = s.yank([]rune(s.prompt), line, pos)
 				goto haveNext
 			case ctrlR: // Reverse Search
 				line, pos, next, err = s.reverseISearch(line, pos)
 				s.needRefresh = true
 				goto haveNext
 			case tab: // Tab completion
-				line, pos, next, err = s.tabComplete(p, line, pos)
+				line, pos, next, err = s.tabComplete([]rune(s.prompt), line, pos)
 				goto haveNext
+			case ctrlZ:
+				fmt.Println("")
+				if s.multiLineMode {
+					s.resetMultiLine([]rune(s.prompt), line, pos)
+				}
+				return "", ErrBackground
 			// Catch keys that do nothing, but you don't want them to beep
 			case esc:
 				// DO NOTHING
 			// Unused keys
-			case ctrlG, ctrlO, ctrlQ, ctrlS, ctrlV, ctrlX, ctrlZ:
+			case ctrlG, ctrlO, ctrlQ, ctrlS, ctrlV, ctrlX:
 				fallthrough
 			// Catch unhandled control codes (anything <= 31)
 			case 0, 28, 29, 30, 31:
 				s.doBeep()
 			default:
 				if pos == len(line) && !s.multiLineMode &&
-					len(p)+len(line) < s.columns*4 && // Avoid countGlyphs on large lines
-					countGlyphs(p)+countGlyphs(line) < s.columns-1 {
+					len([]rune(s.prompt))+len(line) < s.columns*4 && // Avoid countGlyphs on large lines
+					countGlyphs([]rune(s.prompt))+countGlyphs(line) < s.columns-1 {
 					line = append(line, v)
 					fmt.Printf("%c", v)
 					pos++
@@ -997,7 +1011,7 @@ mainLoop:
 			s.needRefresh = true
 		}
 		if s.needRefresh && !s.inputWaiting() {
-			err := s.refresh(p, line, pos)
+			err := s.refresh([]rune(s.prompt), line, pos)
 			if err != nil {
 				return "", err
 			}

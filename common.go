@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"unicode/utf8"
+
+	"github.com/fatih/color"
 )
 
 type commonState struct {
@@ -51,6 +53,8 @@ const (
 	TabCircular TabStyle = iota
 	TabPrints
 )
+
+var ErrBackground = errors.New("prompt backgrounded")
 
 // ErrPromptAborted is returned from Prompt or PasswordPrompt when the user presses Ctrl-C
 // if SetCtrlCAborts(true) has been called on the State
@@ -248,6 +252,18 @@ func (s *State) SetShouldRestart(f ShouldRestart) {
 // ASCII BEL, 0x07). Default is true (will beep).
 func (s *State) SetBeep(beep bool) {
 	s.noBeep = !beep
+}
+
+func (s *State) GetPrompt() string {
+	return s.prompt
+}
+
+func (s *State) SetPrompt(prompt string) {
+	s.prompt = prompt
+}
+
+func (s *State) SetPromptColor(color *color.Color) {
+	s.promptColor = color
 }
 
 func (s *State) promptUnsupported(p string) (string, error) {
