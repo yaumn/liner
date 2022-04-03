@@ -6,6 +6,8 @@ import (
 	"syscall"
 	"unicode/utf16"
 	"unsafe"
+
+	"github.com/fatih/color"
 )
 
 var (
@@ -41,6 +43,8 @@ type State struct {
 	defaultMode inputMode
 	key         interface{}
 	repeat      uint16
+	prompt      string
+	promptColor *color.Color
 }
 
 const (
